@@ -22,6 +22,12 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 #define DHTTYPE DHT22
 DHT dht(DHTPIN, DHTTYPE);
 
+/*------------------------
+        BUTTON
+------------------------*/
+#define buttonPin 12
+int displayScreen = 0; //variable to choose display screen
+
 void setup()
 {
     Serial.begin(9600);
@@ -33,12 +39,17 @@ void setup()
         Serial.println(F("SSD1306 allocation failed"));
         for(;;); //if connection failed, stop
     }
-    displayLayout();
+    displayLayout0();
 
     /*------------------------
         TEMPERATURE SENSOR
     ------------------------*/
     dht.begin();
+
+    /*------------------------
+            BUTTON
+    ------------------------*/
+    pinMode(buttonPin, INPUT);
 }
 
 void loop()
@@ -47,17 +58,39 @@ void loop()
     float humidity = dht.readHumidity();
     float temperature = dht.readTemperature();
 
+    //button  setting
+    bool buttonPressed = digitalRead(buttonPin);
+    if(buttonPressed){
+        displayScreen += 1;
+        if(displayScreen>1) //numbers of screens
+            displayScreen=0;
+        Serial.println("Button pressed");
+    }
 
-    //display output
-    displayLayout();
-    //temperature
-    display.setTextSize(3);
-    display.setCursor(16, 16);
-    display.print(temperature);
-    //humidity
-    display.setTextSize(2);
-    display.setCursor(16, 50);
-    display.print(humidity);
+    //display screens
+    switch (displayScreen){
+        case 0:
+            displayLayout0();
+            //display temperature
+            display.setTextSize(3);
+            display.setCursor(16, 16);
+            display.print(temperature);
+            //display humidity
+            display.setTextSize(2);
+            display.setCursor(16, 50);
+            display.print(humidity);
+            break;
+        case 1: //just for example
+            display.clearDisplay();
+            display.setCursor(0, 0);
+            display.setTextSize(1);
+            display.print("Execution time");
+            display.setTextSize(2);
+            display.setCursor(0, 20);
+            display.print(millis());
+            display.display();
+            break;
+    }
     display.display(); 
 
     //serial output
@@ -81,8 +114,8 @@ void loop()
     delay(2000);
 }
 
-void displayLayout(){
-    //function to set basic display layout
+void displayLayout0(){
+    //function to set layout of screen 0
     display.clearDisplay();
     display.setTextSize(1);
     display.setTextColor(WHITE);
