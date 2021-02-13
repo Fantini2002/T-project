@@ -3,6 +3,7 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "DHT.h"
+#include <SoftwareSerial.h>   
 
 #define room  "Camera Alex"
 
@@ -26,21 +27,98 @@ DHT dht(DHTPIN, DHTTYPE);
         BUTTON
 ------------------------*/
 #define buttonPin 12
-int displayScreen = 0; //variable to choose display screen
+int displayScreen; //variable to choose display screen
+
+/*------------------------
+        Wi-Fi
+------------------------*/
+#define wifiTX 3
+#define wifiRX 2
+SoftwareSerial espSerial =  SoftwareSerial(wifiTX,wifiRX);
+#include "private.h" //import wifi settings
+char wifiReply[50];
+char ip[16];
+
+/*------------------------
+        ERROR LED
+------------------------*/
+#define errorPin 5
 
 void setup()
 {
     Serial.begin(9600);
 
-	/*------------------------
+    /*------------------------
+            ERROR LED
+    ------------------------*/
+    pinMode(errorPin, OUTPUT);
+
+    /*------------------------
+            Wi-Fi
+    ------------------------*/
+    espSerial.begin(9600);
+
+    delay(2000);
+
+    //reset
+    espSerial.print(F("AT+RST\r\n"));
+    getResponse(true, false);
+
+    delay(2000);
+
+    //change mode
+    espSerial.print(F("AT+CWMODE=1\r\n"));
+    getResponse(true, false);
+
+    //connect to wifi
+    espSerial.print(F("AT+CWJAP=\""));
+    espSerial.print(F(wifiName));
+    espSerial.print(F("\",\""));
+    espSerial.print(F(wifiPassword));
+    espSerial.print(F("\"\r\n"));
+    getResponse(true, false);
+
+    //ip
+    espSerial.print(F("AT+CIFSR\r\n"));
+    getResponse(true, true);
+
+    bool memorize = false;
+    int c = 0;
+    for(int i=0; i<strlen(wifiReply); i++){
+        if(wifiReply[i]=='S' && wifiReply[i+1]=='T' && wifiReply[i+2]=='A' && wifiReply[i+3]=='I' && wifiReply[i+4]=='P'){
+            memorize = true;
+        }
+
+        if(memorize){
+            if(wifiReply[i+8-1]!='"' && c<15){
+                ip[c] = wifiReply[i+8-1];
+                c++;
+            }
+            else
+                memorize = false;
+        }
+    }
+
+    //configure for multiple connections; 
+    espSerial.print(F("AT+CIPMUX=1\r\n"));
+    getResponse(true, false);
+
+    //start server on port 80
+    espSerial.print(F("AT+CIPSERVER=1,80\r\n"));
+    getResponse(true, false);
+
+    /*------------------------
             DISPLAY
     ------------------------*/
     if(!display.begin(SSD1306_SWITCHCAPVCC, SCREEN_ADDRESS)) {
         Serial.println(F("SSD1306 allocation failed"));
+        digitalWrite(errorPin, HIGH);
         for(;;); //if connection failed, stop
     }
+    
     displayLayout0();
-
+    displayScreen = 0;
+    
     /*------------------------
         TEMPERATURE SENSOR
     ------------------------*/
@@ -50,6 +128,8 @@ void setup()
             BUTTON
     ------------------------*/
     pinMode(buttonPin, INPUT);
+
+    Serial.println(F("Ready!"));
 }
 
 void loop()
@@ -58,17 +138,17 @@ void loop()
     float humidity = dht.readHumidity();
     float temperature = dht.readTemperature();
 
-    //button  setting
+    //button setting
     bool buttonPressed = digitalRead(buttonPin);
     if(buttonPressed){
         displayScreen += 1;
         if(displayScreen>1) //numbers of screens
             displayScreen=0;
-        Serial.println("Button pressed");
+        Serial.println(F("Button pressed"));
     }
 
     //display screens
-    switch (displayScreen){
+    switch(displayScreen){
         case 0:
             displayLayout0();
             //display temperature
@@ -80,14 +160,14 @@ void loop()
             display.setCursor(16, 50);
             display.print(humidity);
             break;
-        case 1: //just for example
+        case 1:
             display.clearDisplay();
             display.setCursor(0, 0);
             display.setTextSize(1);
-            display.print("Execution time");
+            display.print(F("IP Address"));
             display.setTextSize(2);
             display.setCursor(0, 20);
-            display.print(millis());
+            display.print(ip);
             display.display();
             break;
     }
@@ -95,20 +175,59 @@ void loop()
 
     //serial output
     Serial.print(temperature);
-    Serial.print(" °C - ");
+    Serial.print(F(" °C - "));
     Serial.print(humidity);
-    Serial.println(" %");
+    Serial.println(F(" %"));
 
     //errors control
     if(isnan(humidity) || isnan(temperature)){
         //reading error
-        
-        Serial.println("Reading error");
+        Serial.println(F("Reading error"));
 
         display.clearDisplay();
         display.setCursor(0, 0);
-        display.print("Reading error");
+        display.print(F("Reading error"));
         display.display();
+    }
+    
+    //Wi-Fi comunication
+    if(espSerial.available() && !(isnan(humidity) || isnan(temperature))){   
+
+        bool foundIPD = false;
+        char id;
+        getResponse(false, true);
+        for(int i=0; i<strlen(wifiReply); i++){
+            if((wifiReply[i]=='I') && (wifiReply[i+1]=='P') && (wifiReply[i+2]=='D')){
+                foundIPD = true;
+                id = wifiReply[i+4];
+            }
+        }
+
+        if(foundIPD){
+            espSerial.print(F("AT+CIPSEND="));
+            espSerial.print(id);
+            espSerial.print(F(",13\r\n"));
+            getResponse(true, false);
+            espSerial.print(temperature);
+            espSerial.print(F(" - "));
+            espSerial.print(humidity);
+
+            getResponse(true, false);
+
+            //close
+            espSerial.print(F("AT+CIPCLOSE=0\r\n"));
+            getResponse(true, false);
+
+            //to avoid automatic request from browser (ex. favicon)
+            long int time = millis();
+            while((time + 2000) > millis()){
+                while(espSerial.available()){
+                    espSerial.read();
+                }
+            }
+            
+        }
+        
     }
 
     delay(2000);
@@ -124,17 +243,57 @@ void displayLayout0(){
 
     display.setTextSize(1);
     display.setCursor(0, 23);
-    display.print("T: ");
+    display.print(F("T: "));
     display.setCursor(0, 54);
-    display.print("H: ");
+    display.print(F("H: "));
 
     display.setTextSize(1);
     display.setCursor(110, 23);
     display.cp437(true);
     display.write(167);
-    display.print("C");
+    display.print(F("C"));
 
     display.setTextSize(1);
     display.setCursor(80, 54);
-    display.print("%");
+    display.print(F("%"));
+}
+
+void getResponse(bool control, bool memorize){
+    //bool control: true wait "OK"; false dont't wait
+    //bool memorize: true store message in wifiReply; false not
+    long int time = millis();
+    bool success = false;
+    short c = 0;
+    short wait;
+    if(control)
+        wait = 10000;
+    else
+        wait = 500;
+    while((time + wait) > millis()){
+        char text[4];
+        while(espSerial.available()){
+            text[0] = text[1];
+            text[1] = text[2];
+            text[2] = text[3];
+            text[3] = espSerial.read();
+            Serial.print(text[3]);
+
+            if(memorize && c<50){
+                wifiReply[c] = text[3];
+                c++;
+            }
+
+            if(control && text[0]=='O' && text[1]=='K' && text[2]=='\r' && text[3]=='\n')
+                success = true;
+            
+        }
+        if(success)
+            break;
+    }
+    if(control && !success){
+        Serial.println(F("\n---ERROR---"));
+        digitalWrite(errorPin, HIGH);
+    }
+    Serial.println(F("\n------------------------------"));
+    delay(100);
 }
