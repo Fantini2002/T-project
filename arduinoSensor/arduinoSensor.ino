@@ -3,9 +3,11 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 #include "DHT.h"
-#include <SoftwareSerial.h>   
+#include <SoftwareSerial.h>
 
 #define room  "Camera Alex"
+#define roomNumber 01
+#define server "192.168.2.61"
 
 /*------------------------
         DISPLAY
@@ -43,6 +45,12 @@ char ip[16];
         ERROR LED
 ------------------------*/
 #define errorPin 5
+
+/*------------------------
+        CRON
+------------------------*/
+long previousMillis = 0;
+long interval = 3600000;
 
 void setup()
 {
@@ -99,12 +107,8 @@ void setup()
         }
     }
 
-    //configure for multiple connections; 
-    espSerial.print(F("AT+CIPMUX=1\r\n"));
-    getResponse(true, false);
-
-    //start server on port 80
-    espSerial.print(F("AT+CIPSERVER=1,80\r\n"));
+    //configure for single connections 
+    espSerial.print(F("AT+CIPMUX=0\r\n"));
     getResponse(true, false);
 
     /*------------------------
@@ -190,44 +194,36 @@ void loop()
         display.display();
     }
     
+    //cron
+    long currentMillis = millis();
+
     //Wi-Fi comunication
-    if(espSerial.available() && !(isnan(humidity) || isnan(temperature))){   
+    
+    if((currentMillis - previousMillis >= interval) && !isnan(humidity) && !isnan(temperature)){
 
-        bool foundIPD = false;
-        char id;
-        getResponse(false, true);
-        for(int i=0; i<strlen(wifiReply); i++){
-            if((wifiReply[i]=='I') && (wifiReply[i+1]=='P') && (wifiReply[i+2]=='D')){
-                foundIPD = true;
-                id = wifiReply[i+4];
-            }
-        }
+        previousMillis = currentMillis;
 
-        if(foundIPD){
-            espSerial.print(F("AT+CIPSEND="));
-            espSerial.print(id);
-            espSerial.print(F(",13\r\n"));
-            getResponse(true, false);
-            espSerial.print(temperature);
-            espSerial.print(F(" - "));
-            espSerial.print(humidity);
-
-            getResponse(true, false);
-
-            //close
-            espSerial.print(F("AT+CIPCLOSE=0\r\n"));
-            getResponse(true, false);
-
-            //to avoid automatic request from browser (ex. favicon)
-            long int time = millis();
-            while((time + 2000) > millis()){
-                while(espSerial.available()){
-                    espSerial.read();
-                }
-            }
-            
-        }
+        espSerial.print(F("AT+CIPSTART=\"TCP\",\""));
+        espSerial.print(F(server));
+        espSerial.print(F("\",80\r\n"));
+        getResponse(true, false);
         
+        espSerial.print(F("AT+CIPSEND="));
+        espSerial.print(76); //length of GET request
+        espSerial.print(F("\r\n"));
+        getResponse(true, false);
+
+        espSerial.print("GET /update.php?room=");
+        espSerial.print(roomNumber);
+        espSerial.print("&t=");
+        espSerial.print(temperature);
+        espSerial.print("&h=");
+        espSerial.print(humidity);
+        espSerial.print(" HTTP/1.0\r\n\r\n\r\nHost: ");
+        espSerial.print(server);
+        espSerial.print("\r\n\r\n\r\n");
+        getResponse(false, false);
+
     }
 
     delay(2000);
@@ -268,7 +264,7 @@ void getResponse(bool control, bool memorize){
     if(control)
         wait = 10000;
     else
-        wait = 500;
+        wait = 5000;
     while((time + wait) > millis()){
         char text[4];
         while(espSerial.available()){
