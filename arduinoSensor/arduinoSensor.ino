@@ -7,7 +7,7 @@
 
 #define room  "Camera Alex"
 #define roomNumber 01
-#define server "192.168.2.61"
+#define server "192.168.1.182"
 
 /*------------------------
         DISPLAY
@@ -198,8 +198,7 @@ void loop()
     long currentMillis = millis();
 
     //Wi-Fi comunication
-    
-    if((currentMillis - previousMillis >= interval) && !isnan(humidity) && !isnan(temperature)){
+    if(((currentMillis - previousMillis >= interval) || currentMillis <= 10000) && !isnan(humidity) && !isnan(temperature)){
 
         previousMillis = currentMillis;
 
